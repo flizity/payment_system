@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -61,34 +62,59 @@ func (ps *PaymentSystem) AddTransaction(fromID, toID int, amount float64) {
 	})
 }
 
-func (ps *PaymentSystem) ProcessTransactions() {
-	for i := range ps.TransactionQueue {
-		t := &ps.TransactionQueue[i]
-		if t.Status != "ожидает обработки" {
-			continue
-		}
-
-		fromUser, existsFrom := ps.Users[t.FromID]
-		toUser, existsTo := ps.Users[t.ToID]
-
-		if !existsFrom || !existsTo {
-			t.Status = "ошибка: пользователь не найден"
-			continue
-		}
-
-		if err := fromUser.Withdraw(t.Amount); err != nil {
-			t.Status = "ошибка: " + err.Error()
-			continue
-		}
-
-		if err := toUser.Deposit(t.Amount); err != nil {
-			fromUser.Deposit(t.Amount) // Откат транзакции
-			t.Status = "ошибка: " + err.Error()
-			continue
-		}
-
-		t.Status = "успешно выполнена"
+func (ps *PaymentSystem) ProcessTransaction(t *Transaction) error {
+	if t.Status != "ожидает обработки" {
+		return nil
 	}
+
+	fromUser, existsFrom := ps.Users[t.FromID]
+	toUser, existsTo := ps.Users[t.ToID]
+
+	if !existsFrom || !existsTo {
+		t.Status = "ошибка: пользователь не найден"
+		return fmt.Errorf("ошибка: пользователь не найден")
+	}
+
+	if err := fromUser.Withdraw(t.Amount); err != nil {
+		t.Status = "ошибка: " + err.Error()
+		return err
+	}
+
+	if err := toUser.Deposit(t.Amount); err != nil {
+		fromUser.Deposit(t.Amount)
+		t.Status = "ошибка: " + err.Error()
+		return err
+	}
+
+	t.Status = "успешно выполнена"
+	return nil
+}
+
+func Worker(ps *PaymentSystem, ch <-chan Transaction, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for t := range ch {
+		err := ps.ProcessTransaction(&t)
+		if err != nil {
+			fmt.Println("Ошибка обработки транзакции:", err)
+		}
+	}
+}
+
+func (ps *PaymentSystem) ProcessTransactions() {
+	var wg sync.WaitGroup
+	transactionChan := make(chan Transaction, len(ps.TransactionQueue))
+
+	workerCount := 5
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go Worker(ps, transactionChan, &wg)
+	}
+
+	for _, t := range ps.TransactionQueue {
+		transactionChan <- t
+	}
+	close(transactionChan)
+	wg.Wait()
 }
 
 func main() {
