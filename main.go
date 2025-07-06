@@ -11,9 +11,12 @@ type Acc struct {
 	ID      int
 	Name    string
 	Balance float64
+	mu      sync.Mutex
 }
 
 func (u *Acc) Deposit(amount float64) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if amount <= 0 {
 		return errors.New("нельзя вносить отрицательную сумму")
 	}
@@ -22,6 +25,8 @@ func (u *Acc) Deposit(amount float64) error {
 }
 
 func (u *Acc) Withdraw(amount float64) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if amount <= 0 {
 		return errors.New("сумма должна быть положительной")
 	}
@@ -118,8 +123,8 @@ func (ps *PaymentSystem) ProcessTransactions() {
 }
 
 func main() {
-	u1 := &Acc{14773, "Alex", 2000}
-	u2 := &Acc{23432, "Max", 15000}
+	u1 := &Acc{ID: 14773, Name: "Alex", Balance: 2000}
+	u2 := &Acc{ID: 23432, Name: "Max", Balance: 15000}
 
 	ps := PaymentSystem{}
 	ps.AddUser(u1)
